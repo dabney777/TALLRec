@@ -3,7 +3,6 @@ os.environ['LD_LIBRARY_PATH'] = '/data/baokq/miniconda3/envs/alpaca_lora/lib/'
 import sys
 from typing import List
 
-import numpy as np 
 import fire
 import torch
 import transformers
@@ -19,6 +18,7 @@ import bitsandbytes as bnb
 from peft import (  # noqa: E402
     LoraConfig,
     get_peft_model,
+    PeftModel,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
     set_peft_model_state_dict,
@@ -56,8 +56,10 @@ def train(
     wandb_run_name: str = "",
     wandb_watch: str = "",  # options: false | gradients | all
     wandb_log_model: str = "",  # options: false | true
-    resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
-
+    resume_from_checkpoint: str = "",  # either training checkpoint or final adapter
+    resume_path: str = "",
+    local_rank: int = None,
+    deepspeed: str = "",
 ):
     print(
         f"Training Alpaca-LoRA model with params:\n"
@@ -83,6 +85,8 @@ def train(
         f"wandb_watch: {wandb_watch}\n"
         f"wandb_log_model: {wandb_log_model}\n"
         f"resume_from_checkpoint: {resume_from_checkpoint}\n"
+        f"resumepath : {resume_path}\n"
+        f"local_rank: {local_rank}\n"
     )
     assert (
         base_model
@@ -160,7 +164,7 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    model = prepare_model_for_int8_training(model)
+    # model = prepare_model_for_int8_training(model)
 
     config = LoraConfig(
         r=lora_r,
@@ -170,9 +174,22 @@ def train(
         bias="none",
         task_type="CAUSAL_LM",
     )
+    # config = LoraConfig(
+    #     r=8,
+    #     lora_alpha=16,
+    #     target_modules=['q_proj','v_proj'],
+    #     lora_dropout=0.05,
+    #     bias="none",
+    #     task_type="CAUSAL_LM",
+    # )
+    lora_weights = "tloen/alpaca-lora-7b"
+    model = PeftModel.from_pretrained(
+        model,
+        lora_weights,
+        torch_dtype=torch.float16,
+    )
+    import pdb;pdb.set_trace()
     model = get_peft_model(model, config)
-
-    
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
         train_data = load_dataset("json", data_files=train_data_path)
@@ -190,11 +207,11 @@ def train(
     if resume_from_checkpoint:
         # Check the available weights and load them
         checkpoint_name = os.path.join(
-            resume_from_checkpoint, "pytorch_model.bin"
+            resume_path, "pytorch_model.bin"
         )  # Full checkpoint
         if not os.path.exists(checkpoint_name):
             checkpoint_name = os.path.join(
-                resume_from_checkpoint, "adapter_model.bin"
+                resume_path, "adapter_model.bin"
             )  # only LoRA model - LoRA config above has to fit
             resume_from_checkpoint = (
                 False  # So the trainer won't try loading its state
@@ -203,7 +220,7 @@ def train(
         if os.path.exists(checkpoint_name):
             print(f"Restarting from {checkpoint_name}")
             adapters_weights = torch.load(checkpoint_name)
-            model = set_peft_model_state_dict(model, adapters_weights)
+            set_peft_model_state_dict(model, adapters_weights)
         else:
             print(f"Checkpoint {checkpoint_name} not found")
 
@@ -241,7 +258,7 @@ def train(
             eval_step = 10
         else:
             eval_step = sample / 128 * 5
-    
+
     trainer = transformers.Trainer(
         model=model,
         train_dataset=train_data,
@@ -252,7 +269,7 @@ def train(
             warmup_steps=20,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
-            fp16=True,
+            fp16=False,
             logging_steps=8,
             optim="adamw_torch",
             evaluation_strategy="steps",
@@ -275,7 +292,7 @@ def train(
         ),
         compute_metrics=compute_metrics,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
-        callbacks = [EarlyStoppingCallback(early_stopping_patience=10)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=15)]
     )
     model.config.use_cache = False
 
@@ -286,12 +303,13 @@ def train(
         )
     ).__get__(model, type(model))
 
-    if torch.__version__ >= "2" and sys.platform != "win32":
-        model = torch.compile(model)
+    # if torch.__version__ >= "2" and sys.platform != "win32":
+    #     model = torch.compile(model)
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
-    model.save_pretrained(output_dir)
+    if local_rank == 0:
+        model.save_pretrained(output_dir, state_dict=old_state_dict())
 
     print(
         "\n If there's a warning about missing keys above, please disregard :)"
