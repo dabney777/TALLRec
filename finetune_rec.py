@@ -17,6 +17,7 @@ import bitsandbytes as bnb
 
 from peft import (  # noqa: E402
     LoraConfig,
+    tuners,
     get_peft_model,
     PeftModel,
     get_peft_model_state_dict,
@@ -164,7 +165,7 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    # model = prepare_model_for_int8_training(model)
+    model = prepare_model_for_int8_training(model)
 
     config = LoraConfig(
         r=lora_r,
@@ -188,8 +189,11 @@ def train(
         lora_weights,
         torch_dtype=torch.float16,
     )
-    import pdb;pdb.set_trace()
-    model = get_peft_model(model, config)
+
+    for n, p in model.named_parameters():
+        if "lora_" in n:
+            p.requires_grad_()
+
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
         train_data = load_dataset("json", data_files=train_data_path)
