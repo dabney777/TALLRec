@@ -11,7 +11,7 @@ do
     do
         for sample in 64
         do
-                mkdir -p $output_dir
+                mkdir -p ${output_dir}_${seed}_${sample}
                 echo "lr: $lr, dropout: $dropout , seed: $seed, sample: $sample outputdir: ${output_dir}_${seed}_${sample}"
                 deepspeed  --num_gpus=4 finetune_rec.py \
                     --base_model $base_model \
@@ -41,6 +41,7 @@ output_dir=$2
 model_path=$(ls -d $output_dir*)
 base_model="decapoda-research/llama-7b-hf"
 test_data="./data/movie/test.json"
+CUDA_ID=0,1,2,3
 for path in $model_path
 do
     echo $path

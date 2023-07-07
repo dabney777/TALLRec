@@ -11,9 +11,9 @@ do
     do
         for sample in 64
         do
-                mkdir -p $output_dir
+                mkdir -p ${output_dir}_${seed}_${sample}
                 echo "lr: $lr, dropout: $dropout , seed: $seed, sample: $sample outputdir: ${output_dir}_${seed}_${sample}"
-                deepspeed  --num_gpus=4 finetune_rec.py \
+                deepspeed  --num_gpus=2 finetune_rec.py \
                     --base_model $base_model \
                     --train_data_path $train_data \
                     --val_data_path $val_data \

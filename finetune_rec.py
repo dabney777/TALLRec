@@ -9,6 +9,7 @@ import transformers
 from datasets import load_dataset
 from transformers import EarlyStoppingCallback
 
+import torch.distributed.launch
 """
 Unused imports:
 import torch.nn as nn
@@ -115,7 +116,8 @@ def train(
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
 
     model = LlamaForCausalLM.from_pretrained(
-        base_model,
+        # base_model,
+        "./hf_ckpt",
         load_in_8bit=True,
         torch_dtype=torch.float16,
         device_map=device_map,
@@ -175,24 +177,7 @@ def train(
         bias="none",
         task_type="CAUSAL_LM",
     )
-    # config = LoraConfig(
-    #     r=8,
-    #     lora_alpha=16,
-    #     target_modules=['q_proj','v_proj'],
-    #     lora_dropout=0.05,
-    #     bias="none",
-    #     task_type="CAUSAL_LM",
-    # )
-    lora_weights = "tloen/alpaca-lora-7b"
-    model = PeftModel.from_pretrained(
-        model,
-        lora_weights,
-        torch_dtype=torch.float16,
-    )
-
-    for n, p in model.named_parameters():
-        if "lora_" in n:
-            p.requires_grad_()
+    model = get_peft_model(model, config)
 
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
@@ -263,34 +248,40 @@ def train(
         else:
             eval_step = sample / 128 * 5
 
+    # if local_rank == 0:
+    #     import pdb;pdb.set_trace()
+    # else:
+    #     import time
+    #     time.sleep(3600)
+    trainer_arg = transformers.TrainingArguments(
+        per_device_train_batch_size=micro_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        warmup_steps=20,
+        num_train_epochs=num_epochs,
+        learning_rate=learning_rate,
+        fp16=False,
+        logging_steps=8,
+        optim="adamw_torch",
+        evaluation_strategy="steps",
+        save_strategy="steps",
+        eval_steps=eval_step,
+        save_steps=eval_step,
+        output_dir=output_dir,
+        save_total_limit=1,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_auc",
+        ddp_find_unused_parameters=False if ddp else None,
+        group_by_length=group_by_length,
+        report_to=None,
+        # report_to="wandb" if use_wandb else None,
+        # run_name=wandb_run_name if use_wandb else None,
+        # eval_accumulation_steps=10,
+    )
     trainer = transformers.Trainer(
         model=model,
         train_dataset=train_data,
         eval_dataset=val_data,
-        args=transformers.TrainingArguments(
-            per_device_train_batch_size=micro_batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=20,
-            num_train_epochs=num_epochs,
-            learning_rate=learning_rate,
-            fp16=False,
-            logging_steps=8,
-            optim="adamw_torch",
-            evaluation_strategy="steps",
-            save_strategy="steps",
-            eval_steps=eval_step,
-            save_steps=eval_step,
-            output_dir=output_dir,
-            save_total_limit=1,
-            load_best_model_at_end=True,
-            metric_for_best_model="eval_auc",
-            ddp_find_unused_parameters=False if ddp else None,
-            group_by_length=group_by_length,
-            report_to=None,
-            # report_to="wandb" if use_wandb else None,
-            # run_name=wandb_run_name if use_wandb else None,
-            # eval_accumulation_steps=10,
-        ),
+        args=trainer_arg,
         data_collator=transformers.DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
         ),
@@ -309,8 +300,9 @@ def train(
 
     # if torch.__version__ >= "2" and sys.platform != "win32":
     #     model = torch.compile(model)
-
+    print('trainer deepspeed:', trainer.is_deepspeed_enabled)
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    print(f'local_rank:{local_rank}')
 
     if local_rank == 0:
         model.save_pretrained(output_dir, state_dict=old_state_dict())

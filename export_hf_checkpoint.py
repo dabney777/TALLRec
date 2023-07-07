@@ -29,9 +29,7 @@ lora_model = PeftModel.from_pretrained(
     torch_dtype=torch.float16,
 )
 
-lora_weight = lora_model.base_model.model.model.layers[
-    0
-].self_attn.q_proj.weight
+lora_weight = lora_model.base_model.model.model.layers[0].self_attn.q_proj.weight
 
 assert torch.allclose(first_weight_old, first_weight)
 
@@ -39,6 +37,7 @@ assert torch.allclose(first_weight_old, first_weight)
 for layer in lora_model.base_model.model.model.layers:
     layer.self_attn.q_proj.merge_weights = True
     layer.self_attn.v_proj.merge_weights = True
+lora_model = lora_model.base_model.merge_and_unload()
 
 lora_model.train(False)
 
