@@ -10,6 +10,7 @@ from datasets import load_dataset
 from transformers import EarlyStoppingCallback
 
 import torch.distributed.launch
+from torch.distributed.elastic.multiprocessing.errors import record
 """
 Unused imports:
 import torch.nn as nn
@@ -28,6 +29,7 @@ from peft import (  # noqa: E402
 from transformers import LlamaForCausalLM, LlamaTokenizer  # noqa: F402
 from sklearn.metrics import roc_auc_score
 
+@record
 def train(
     # model/data params
     base_model: str = "",  # the only required argument
@@ -116,8 +118,8 @@ def train(
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
 
     model = LlamaForCausalLM.from_pretrained(
-        # base_model,
-        "./hf_ckpt",
+        base_model,
+        # "./hf_ckpt",
         load_in_8bit=True,
         torch_dtype=torch.float16,
         device_map=device_map,
@@ -265,6 +267,7 @@ def train(
         evaluation_strategy="steps",
         save_strategy="steps",
         eval_steps=eval_step,
+        deepspeed='./shell/ds.json',
         save_steps=eval_step,
         output_dir=output_dir,
         save_total_limit=1,

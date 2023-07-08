@@ -23,7 +23,7 @@ do
                     --num_epochs 200 \
                     --learning_rate $lr \
                     --cutoff_len 512 \
-                    --lora_r 8 \
+                    --lora_r 12 \
                     --lora_alpha 16\
                     --lora_dropout $dropout \
                     --lora_target_modules '[q_proj,v_proj]' \
@@ -37,7 +37,7 @@ do
     done
 done
 
-output_dir=$2
+output_dir=./output/
 model_path=$(ls -d $output_dir*)
 base_model="decapoda-research/llama-7b-hf"
 test_data="./data/movie/test.json"
