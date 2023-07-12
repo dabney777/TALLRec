@@ -12,7 +12,7 @@ do
         do
                 mkdir -p ${output_dir}_${seed}_${sample}
                 echo "lr: $lr, dropout: $dropout , seed: $seed, sample: $sample outputdir: ${output_dir}_${seed}_${sample}"
-                deepspeed  --num_gpus=2 finetune_rec_on_alpaca.py \
+                deepspeed  --num_gpus=8 finetune_rec_on_alpaca.py \
                     --base_model $base_model \
                     --train_data_path $train_data \
                     --val_data_path $val_data \

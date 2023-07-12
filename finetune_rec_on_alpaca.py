@@ -177,11 +177,11 @@ def train(
         device_map={"": "cpu"},
         torch_dtype=torch.float16,
     )
-    for k,v in model.state_dict().items():
+    for k,v in model.named_parameters():
         if 'lora_' in k:
             v.requires_grad_()
 
-    model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
+    import pdb;pdb.set_trace()
 
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
