@@ -12,7 +12,7 @@ do
         do
                 mkdir -p ${output_dir}_${seed}_${sample}
                 echo "lr: $lr, dropout: $dropout , seed: $seed, sample: $sample outputdir: ${output_dir}_${seed}_${sample}"
-                deepspeed  --num_gpus=8 finetune_rec_on_alpaca.py \
+                deepspeed  finetune_rec_on_alpaca.py \
                     --base_model $base_model \
                     --train_data_path $train_data \
                     --val_data_path $val_data \
@@ -30,7 +30,7 @@ do
                     --group_by_length \
                     --resume_from_checkpoint $instruction_model \
                     --sample $sample \
-                    --seed $1 \
+                    --seed $seed \
                     --deepspeed ./shell/ds.json
         done
     done

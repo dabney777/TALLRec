@@ -177,21 +177,23 @@ def train(
         device_map={"": "cpu"},
         torch_dtype=torch.float16,
     )
-    for k,v in model.named_parameters():
-        if 'lora_' in k:
-            v.requires_grad_()
+    lora_config = model.peft_config['default']
+    lora_config.inference_mode=False
+    lora_config.target_modules = lora_target_modules
+
+    model = get_peft_model(model, lora_config)
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
         train_data = load_dataset("json", data_files=train_data_path)
     else:
         train_data = load_dataset(train_data_path)
-    
+
     if val_data_path.endswith(".json"):  # todo: support jsonl
         val_data = load_dataset("json", data_files=val_data_path)
     else:
         val_data = load_dataset(val_data_path)
 
-    
+
     # train_data = train_data.shuffle(seed=42)[:sample] if sample > -1 else train_data
     # print(len(train_data))
     if resume_from_checkpoint:
@@ -228,7 +230,7 @@ def train(
         pre, labels = eval_preds
         auc = roc_auc_score(pre[1], pre[0])
         return {'auc': auc}
-    
+
     def preprocess_logits_for_metrics(logits, labels):
         """
         Original Trainer may have a memory leak. 
@@ -242,7 +244,7 @@ def train(
         return logits[:, 1][2::3], gold[2::3]
 
     os.environ["WANDB_DISABLED"] = "true"
-    
+
     if sample > -1:
         if sample <= 128 :
             eval_step = 10
