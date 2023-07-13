@@ -118,8 +118,8 @@ def train(
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
 
     model = LlamaForCausalLM.from_pretrained(
-        base_model,
-        # "./hf_ckpt",
+        # base_model,
+        "./hf_ckpt",
         load_in_8bit=True,
         torch_dtype=torch.float16,
         device_map=device_map,

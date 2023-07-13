@@ -174,14 +174,17 @@ def train(
     model = PeftModel.from_pretrained(
         model,
         "tloen/alpaca-lora-7b",
-        device_map={"": "cpu"},
         torch_dtype=torch.float16,
     )
     lora_config = model.peft_config['default']
     lora_config.inference_mode=False
     lora_config.target_modules = lora_target_modules
+    for n, p in model.named_parameters():
+        for target_module in lora_target_modules:
+            if target_module in n and 'lora' in n:
+                p.requires_grad_()
+                break
 
-    model = get_peft_model(model, lora_config)
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
         train_data = load_dataset("json", data_files=train_data_path)
@@ -319,10 +322,10 @@ def train(
 def generate_prompt(data_point):
     # sorry about the formatting disaster gotta move fast
     if data_point["input"]:
-        return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.  # noqa: E501
+        return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
 ### Instruction:
-{data_point["instruction"]}
+Your task is to estimate the user's preferences based on the infomation mentioned below. Yes means user will enjoy this movie, else No. Please response in format like this: \nYes, Because...\n Remember, The first word should be Yes or No. Reason should be not more than 10 words. And don't say other words not in json. Please consider the key elements of each movie and the user enjoyed movie features.
 
 ### Input:
 {data_point["input"]}

@@ -77,6 +77,7 @@ def main(
         # data[train_sce][test_sce][model_name][seed][sample] = 
 
     tokenizer = LlamaTokenizer.from_pretrained(base_model)
+    print(f'device: {device}')
     if device == "cuda":
         model = LlamaForCausalLM.from_pretrained(
             base_model,
@@ -84,12 +85,12 @@ def main(
             torch_dtype=torch.float16,
             device_map="auto",
         )
-        model = PeftModel.from_pretrained(
-            model,
-            lora_weights,
-            torch_dtype=torch.float16,
-            device_map={'': 0}
-        )
+        # model = PeftModel.from_pretrained(
+        #     model,
+        #     lora_weights,
+        #     torch_dtype=torch.float16,
+        #     device_map={'': 0}
+        # )
     elif device == "mps":
         model = LlamaForCausalLM.from_pretrained(
             base_model,
@@ -132,8 +133,7 @@ def main(
             top_p=1.0,
             top_k=40,
             num_beams=1,
-            max_new_tokens=128,
-            batch_size=1,
+            max_new_tokens=2,
             **kwargs,
     ):
         prompt = [generate_prompt(instruction, input) for instruction, input in zip(instructions, inputs)]
@@ -162,7 +162,7 @@ def main(
         s = generation_output.sequences
         output = tokenizer.batch_decode(s, skip_special_tokens=True)
         output = [_.split('Response:\n')[-1] for _ in output]
-
+        print(output)
         return output, logits.tolist()
 
     # testing code for readme
@@ -180,7 +180,7 @@ def main(
         inputs = [_['input'] for _ in test_data]
         gold = [int(_['output'] == 'Yes.') for _ in test_data]
 
-        def batch(list, batch_size=32):
+        def batch(list, batch_size=96):
             chunk_size = (len(list) - 1) // batch_size + 1
             for i in range(chunk_size):
                 yield list[batch_size * i: batch_size * (i + 1)]
@@ -195,9 +195,15 @@ def main(
             test_data[i]['logits'] = logits[i]
             pred.append(logits[i][0])
 
-    from sklearn.metrics import roc_auc_score
-
+    from sklearn.metrics import roc_auc_score, classification_report
+    import numpy as np
+    def min_max_scale(arr):
+        return (arr - (arr.sum() / len(arr))) / (arr.max() - arr.min())
+    pred = min_max_scale(np.array(pred))
+    pred = np.where(pred >= 0.5, 1, 0)
+    print(classification_report(gold, pred))
     data[train_sce][test_sce][model_name][seed][sample] = roc_auc_score(gold, pred)
+
     f = open(result_json_data, 'w')
     json.dump(data, f, indent=4)
     f.close()
@@ -208,7 +214,7 @@ def generate_prompt(instruction, input=None):
         return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.  # noqa: E501
 
 ### Instruction:
-{instruction}
+Your task is to estimate the user's preferences based on the infomation mentioned below. Yes means user will enjoy this movie, else No. Please response in format like those: \nYes, Because...\nNo, Because... \n Remember, The first word must be Yes or No. Reason should be not more than 10 words. And don't say other words not in json. Please consider the key elements of each movie and the user enjoyed movie features.
 
 ### Input:
 {input}

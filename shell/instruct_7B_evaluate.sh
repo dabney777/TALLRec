@@ -36,7 +36,7 @@ do
         done
     done
 done
-cp -r ./output /data/local/daoningjiang/Singularity/TALLRec/re_train
+cp -r ./output /data/local/daoningjiang/Singularity/TALLRec/qv_alpaca/
 
 output_dir=./output/
 model_path=$(ls -d $output_dir*)
