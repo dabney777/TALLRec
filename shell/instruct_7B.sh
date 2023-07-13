@@ -31,7 +31,7 @@ do
                     --group_by_length \
                     --resume_from_checkpoint $instruction_model \
                     --sample $sample \
-                    --seed $1 \
+                    --seed $seed \
                     --deepspeed ./shell/ds.json
         done
     done

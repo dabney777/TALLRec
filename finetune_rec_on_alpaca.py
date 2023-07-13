@@ -169,7 +169,7 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    # model = prepare_model_for_int8_training(model)
+    model = prepare_model_for_int8_training(model)
 
     model = PeftModel.from_pretrained(
         model,
@@ -180,9 +180,6 @@ def train(
     for k,v in model.named_parameters():
         if 'lora_' in k:
             v.requires_grad_()
-
-    import pdb;pdb.set_trace()
-
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
         train_data = load_dataset("json", data_files=train_data_path)

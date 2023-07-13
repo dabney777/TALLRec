@@ -173,7 +173,7 @@ def main(
     gold = []
     pred = []
 
-    with open(test_data_path, 'r') as f:
+    with open(test_data_path, 'r', encoding='latin-1') as f:
         test_data = json.load(f)
         instructions = [_['instruction'] for _ in test_data]
         inputs = [_['input'] for _ in test_data]
@@ -223,3 +223,4 @@ def generate_prompt(instruction, input=None):
 
 if __name__ == "__main__":
     fire.Fire(main)
+

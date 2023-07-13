@@ -1,4 +1,4 @@
-seed=9999
+seed=999
 output_dir="./output/movierec"
 base_model="decapoda-research/llama-7b-hf"
 train_data="./data/movie/train.json"
