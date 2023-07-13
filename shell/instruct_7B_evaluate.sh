@@ -13,7 +13,7 @@ do
         do
                 mkdir -p ${output_dir}_${seed}_${sample}
                 echo "lr: $lr, dropout: $dropout , seed: $seed, sample: $sample outputdir: ${output_dir}_${seed}_${sample}"
-                deepspeed  --num_gpus=4 finetune_rec.py \
+                deepspeed  finetune_rec.py \
                     --base_model $base_model \
                     --train_data_path $train_data \
                     --val_data_path $val_data \
@@ -31,17 +31,18 @@ do
                     --group_by_length \
                     --resume_from_checkpoint $instruction_model \
                     --sample $sample \
-                    --seed $1 \
+                    --seed $seed \
                     --deepspeed ./shell/ds.json
         done
     done
 done
+cp -r ./output /data/local/daoningjiang/Singularity/TALLRec/re_train
 
 output_dir=./output/
 model_path=$(ls -d $output_dir*)
 base_model="decapoda-research/llama-7b-hf"
 test_data="./data/movie/test.json"
-CUDA_ID=0,1,2,3
+CUDA_ID=0,1
 for path in $model_path
 do
     echo $path
