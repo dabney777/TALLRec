@@ -7,7 +7,7 @@ import fire
 import torch
 import transformers
 from datasets import load_dataset
-from transformers import EarlyStoppingCallback
+from transformers import EarlyStoppingCallback, GenerationConfig
 
 import torch.distributed.launch
 from torch.distributed.elastic.multiprocessing.errors import record
@@ -28,7 +28,6 @@ from peft import (  # noqa: E402
 from transformers import LlamaForCausalLM, LlamaTokenizer  # noqa: F402
 from sklearn.metrics import roc_auc_score
 
-@record
 def train(
     # model/data params
     base_model: str = "",  # the only required argument
@@ -49,9 +48,7 @@ def train(
     lora_dropout: float = 0.05,
     lora_target_modules: List[str] = [
         "q_proj",
-        "k_proj",
         "v_proj",
-        "o_proj",
     ],
     # llm hyperparams
     train_on_inputs: bool = True,  # if False, masks out inputs in loss
@@ -62,7 +59,6 @@ def train(
     wandb_watch: str = "",  # options: false | gradients | all
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = "",  # either training checkpoint or final adapter
-    resume_path: str = "",
     local_rank: int = None,
     deepspeed: str = "",
 ):
@@ -90,7 +86,6 @@ def train(
         f"wandb_watch: {wandb_watch}\n"
         f"wandb_log_model: {wandb_log_model}\n"
         f"resume_from_checkpoint: {resume_from_checkpoint}\n"
-        f"resumepath : {resume_path}\n"
         f"local_rank: {local_rank}\n"
     )
     assert (
@@ -120,6 +115,7 @@ def train(
 
     model = LlamaForCausalLM.from_pretrained(
         base_model,
+        # "./hf_ckpt",
         load_in_8bit=True,
         torch_dtype=torch.float16,
         device_map=device_map,
@@ -171,19 +167,30 @@ def train(
 
     model = prepare_model_for_int8_training(model)
 
-    model = PeftModel.from_pretrained(
-        model,
-        "tloen/alpaca-lora-7b",
-        torch_dtype=torch.float16,
+    # model = PeftModel.from_pretrained(
+    #     model,
+    #     "tloen/alpaca-lora-7b",
+    #     torch_dtype=torch.float16,
+    # )
+    config = LoraConfig(
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        target_modules=lora_target_modules,
+        lora_dropout=lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
     )
-    lora_config = model.peft_config['default']
-    lora_config.inference_mode=False
-    lora_config.target_modules = lora_target_modules
-    for n, p in model.named_parameters():
-        for target_module in lora_target_modules:
-            if target_module in n and 'lora' in n:
-                p.requires_grad_()
-                break
+
+    model = get_peft_model(model, config)
+    # lora_config = model.peft_config['default']
+    # lora_config.inference_mode=False
+    # lora_config.target_modules = lora_target_modules
+    # for n, p in model.named_parameters():
+    #     if 'lora_' in n and any([_ in n for _ in lora_config.target_modules]):
+    #         p.requires_grad_()
+        # for target_module in lora_target_modules:
+        #     if target_module in n and 'lora' in n:
+        #         p.requires_grad_()
 
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
@@ -202,11 +209,11 @@ def train(
     if resume_from_checkpoint:
         # Check the available weights and load them
         checkpoint_name = os.path.join(
-            resume_path, "pytorch_model.bin"
+            resume_from_checkpoint, "pytorch_model.bin"
         )  # Full checkpoint
         if not os.path.exists(checkpoint_name):
             checkpoint_name = os.path.join(
-                resume_path, "adapter_model.bin"
+                resume_from_checkpoint, "adapter_model.bin"
             )  # only LoRA model - LoRA config above has to fit
             resume_from_checkpoint = (
                 False  # So the trainer won't try loading its state
@@ -223,16 +230,63 @@ def train(
 
     train_data["train"] = train_data["train"].shuffle(seed=seed).select(range(sample)) if sample > -1 else train_data["train"].shuffle(seed=seed)
     train_data["train"] = train_data["train"].shuffle(seed=seed)
+
     train_data = (train_data["train"].map(generate_and_tokenize_prompt))
     val_data = (val_data["train"].map(generate_and_tokenize_prompt))
     if not ddp and torch.cuda.device_count() > 1:
         model.is_parallelizable = True
         model.model_parallel = True
 
+    eval_instructions = train_data['instruction'].copy()
+    eval_inputs = train_data['input'].copy()
+    eval_output= train_data['output'].copy()
+    def evaluate(
+            instructions,
+            inputs=None,
+            temperature=0,
+            top_p=1.0,
+            top_k=40,
+            num_beams=1,
+            max_new_tokens=6,
+            device='cuda',
+            **kwargs,
+    ):
+        prompt = [generate_prompt({'input':input, 'output':''}) for instruction, input in zip(instructions, inputs)]
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True).to(device)
+        generation_config = GenerationConfig(
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            num_beams=num_beams,
+            **kwargs,
+        )
+        with torch.no_grad():
+            generation_output = model.generate(
+                **inputs,
+                generation_config=generation_config,
+                return_dict_in_generate=True,
+                output_scores=True,
+                max_new_tokens=max_new_tokens,
+                # batch_size=batch_size,
+            )
+        scores = generation_output.scores[0].softmax(dim=-1)
+        logits = torch.tensor(scores[:, [8241, 3782]], dtype=torch.float32).softmax(dim=-1)
+        input_ids = inputs["input_ids"].to(device)
+        L = input_ids.shape[1]
+        s = generation_output.sequences
+        output = tokenizer.batch_decode(s, skip_special_tokens=True)
+        output = [_.split('Response:\n')[-1] for _ in output]
+        print('\n'.join(output))
+        return output, logits.tolist()
+
+
     def compute_metrics(eval_preds):
         pre, labels = eval_preds
         auc = roc_auc_score(pre[1], pre[0])
-        return {'auc': auc}
+        # output, _ = evaluate(eval_instructions[:2], eval_inputs[:2])
+        # with torch.no_grad():
+        #     model()
+        return {'auc': auc} #, 'output': output[0]}
 
     def preprocess_logits_for_metrics(logits, labels):
         """
@@ -294,7 +348,7 @@ def train(
         ),
         compute_metrics=compute_metrics,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=15)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=10)]
     )
     model.config.use_cache = False
 
@@ -305,14 +359,15 @@ def train(
         )
     ).__get__(model, type(model))
 
-    # if torch.__version__ >= "2" and sys.platform != "win32":
-    #     model = torch.compile(model)
+    if torch.__version__ >= "2" and sys.platform != "win32":
+        model = torch.compile(model)
     print('trainer deepspeed:', trainer.is_deepspeed_enabled)
-    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     print(f'local_rank:{local_rank}')
 
+    trainer.train(resume_from_checkpoint=False)
+
     if local_rank == 0:
-        model.save_pretrained(output_dir, state_dict=old_state_dict())
+        model.save_pretrained(output_dir, max_shard_size='600MB')
 
     print(
         "\n If there's a warning about missing keys above, please disregard :)"
@@ -323,17 +378,14 @@ def generate_prompt(data_point):
     # sorry about the formatting disaster gotta move fast
     if data_point["input"]:
         return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
+        
+### Instruction: Your task is to estimate the user's preferences based on the infomation in ###Input.Yes means user will enjoy this movie, No means user will dislike the movie. Remember, The first word must be Yes or No. Please consider the key elements of each movie and the user enjoyed movie features.
 
-### Instruction:
-Your task is to estimate the user's preferences based on the infomation mentioned below. Yes means user will enjoy this movie, else No. Please response in format like this: \nYes, Because...\n Remember, The first word should be Yes or No. Reason should be not more than 10 words. And don't say other words not in json. Please consider the key elements of each movie and the user enjoyed movie features.
+### Input: {data_point["input"]}
 
-### Input:
-{data_point["input"]}
-
-### Response:
-{data_point["output"]}"""
+### Response:{data_point["output"]} """
     else:
-        return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.  # noqa: E501
+        return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.  
 
 ### Instruction:
 {data_point["instruction"]}

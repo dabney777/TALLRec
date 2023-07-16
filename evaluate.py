@@ -74,10 +74,10 @@ def main(
         data[train_sce][test_sce][model_name][seed] = {}
     if data[train_sce][test_sce][model_name][seed].__contains__(sample):
         exit(0)
-        # data[train_sce][test_sce][model_name][seed][sample] = 
+        # data[train_sce][test_sce][model_name][seed][sample] =
 
     tokenizer = LlamaTokenizer.from_pretrained(base_model)
-    print(f'device: {device}')
+    print(f'device: {device}, lora_weights: {lora_weights}')
     if device == "cuda":
         model = LlamaForCausalLM.from_pretrained(
             base_model,
@@ -85,12 +85,12 @@ def main(
             torch_dtype=torch.float16,
             device_map="auto",
         )
-        # model = PeftModel.from_pretrained(
-        #     model,
-        #     lora_weights,
-        #     torch_dtype=torch.float16,
-        #     device_map={'': 0}
-        # )
+        model = PeftModel.from_pretrained(
+            model,
+            lora_weights,
+            torch_dtype=torch.float16,
+            device_map={'': 0}
+        )
     elif device == "mps":
         model = LlamaForCausalLM.from_pretrained(
             base_model,
@@ -126,6 +126,7 @@ def main(
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
 
+
     def evaluate(
             instructions,
             inputs=None,
@@ -133,7 +134,7 @@ def main(
             top_p=1.0,
             top_k=40,
             num_beams=1,
-            max_new_tokens=2,
+            max_new_tokens=8,
             **kwargs,
     ):
         prompt = [generate_prompt(instruction, input) for instruction, input in zip(instructions, inputs)]
@@ -156,13 +157,21 @@ def main(
             )
         s = generation_output.sequences
         scores = generation_output.scores[0].softmax(dim=-1)
-        logits = torch.tensor(scores[:, [8241, 3782]], dtype=torch.float32).softmax(dim=-1)
+        # logits = torch.tensor(scores[:, [8241, 3782]], dtype=torch.float32).softmax(dim=-1)
+        logits = []
+        for _ in scores:
+            if 'yes' in tokenizer._convert_id_to_token(int(torch.argmax(_))).lower():
+                logits.append(torch.topk(_, k=2, largest=True).values.softmax(dim=-1))
+            else:
+                logits.append(torch.topk(_, k=2, largest=True).values.flip(dims=[0]).softmax(dim=-1))
+        logits = torch.vstack(logits)
         input_ids = inputs["input_ids"].to(device)
         L = input_ids.shape[1]
         s = generation_output.sequences
         output = tokenizer.batch_decode(s, skip_special_tokens=True)
         output = [_.split('Response:\n')[-1] for _ in output]
-        print(output)
+        for _ in logits.tolist():
+            print(_)
         return output, logits.tolist()
 
     # testing code for readme
@@ -199,10 +208,12 @@ def main(
     import numpy as np
     def min_max_scale(arr):
         return (arr - (arr.sum() / len(arr))) / (arr.max() - arr.min())
-    pred = min_max_scale(np.array(pred))
-    pred = np.where(pred >= 0.5, 1, 0)
-    print(classification_report(gold, pred))
+
     data[train_sce][test_sce][model_name][seed][sample] = roc_auc_score(gold, pred)
+    cls_pred = min_max_scale(np.array(pred))
+    cls_pred = np.where(cls_pred >= 0, 1, 0)
+    print(classification_report(gold, cls_pred))
+    import pdb;pdb.set_trace()
 
     f = open(result_json_data, 'w')
     json.dump(data, f, indent=4)
@@ -211,18 +222,14 @@ def main(
 
 def generate_prompt(instruction, input=None):
     if input:
-        return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.  # noqa: E501
+        return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.  
+### Instruction: Your task is to estimate the user's preferences based on the infomation in ###Input.Yes means user will enjoy this movie, No means user will dislike the movie. Remember, The first word must be Yes or No. Please consider the key elements of each movie and the user enjoyed movie features.
 
-### Instruction:
-Your task is to estimate the user's preferences based on the infomation mentioned below. Yes means user will enjoy this movie, else No. Please response in format like those: \nYes, Because...\nNo, Because... \n Remember, The first word must be Yes or No. Reason should be not more than 10 words. And don't say other words not in json. Please consider the key elements of each movie and the user enjoyed movie features.
+### Input: {input}
 
-### Input:
-{input}
-
-### Response:
-"""
+### Response:"""
     else:
-        return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.  # noqa: E501
+        return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request. 
 
 ### Instruction:
 {instruction}
