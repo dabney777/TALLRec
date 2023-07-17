@@ -19,7 +19,7 @@ do
                     --output_dir $output_dir"_"$seed"_"$sample \
                     --batch_size 1280 \
                     --micro_batch_size 64 \
-                    --num_epochs 120 \
+                    --num_epochs 140 \
                     --learning_rate $lr \
                     --cutoff_len 512 \
                     --lora_r 16 \

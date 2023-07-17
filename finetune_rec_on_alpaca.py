@@ -167,30 +167,29 @@ def train(
 
     model = prepare_model_for_int8_training(model)
 
-    # model = PeftModel.from_pretrained(
-    #     model,
-    #     "tloen/alpaca-lora-7b",
-    #     torch_dtype=torch.float16,
-    # )
-    config = LoraConfig(
-        r=lora_r,
-        lora_alpha=lora_alpha,
-        target_modules=lora_target_modules,
-        lora_dropout=lora_dropout,
-        bias="none",
-        task_type="CAUSAL_LM",
+    model = PeftModel.from_pretrained(
+        model,
+        "tloen/alpaca-lora-7b",
+        torch_dtype=torch.float16,
     )
-
-    model = get_peft_model(model, config)
-    # lora_config = model.peft_config['default']
-    # lora_config.inference_mode=False
-    # lora_config.target_modules = lora_target_modules
-    # for n, p in model.named_parameters():
-    #     if 'lora_' in n and any([_ in n for _ in lora_config.target_modules]):
-    #         p.requires_grad_()
-        # for target_module in lora_target_modules:
-        #     if target_module in n and 'lora' in n:
-        #         p.requires_grad_()
+    # config = LoraConfig(
+    #     r=lora_r,
+    #     lora_alpha=lora_alpha,
+    #     target_modules=lora_target_modules,
+    #     lora_dropout=lora_dropout,
+    #     bias="none",
+    #     task_type="CAUSAL_LM",
+    # )
+    #
+    # model = get_peft_model(model, config)
+    lora_config = model.peft_config['default']
+    lora_config.inference_mode=False
+    lora_config.target_modules = lora_target_modules
+    for n, p in model.named_parameters():
+        # if 'lora_' in n and any([_ in n for _ in lora_config.target_modules]):
+        #     p.requires_grad_()
+        if 'lora_' in n:
+            p.requires_grad_()
 
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
@@ -364,10 +363,10 @@ def train(
     print('trainer deepspeed:', trainer.is_deepspeed_enabled)
     print(f'local_rank:{local_rank}')
 
-    trainer.train(resume_from_checkpoint=False)
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     if local_rank == 0:
-        model.save_pretrained(output_dir, max_shard_size='600MB')
+        model.save_pretrained(output_dir,  state_dict=old_state_dict(), max_shard_size='600MB')
 
     print(
         "\n If there's a warning about missing keys above, please disregard :)"
