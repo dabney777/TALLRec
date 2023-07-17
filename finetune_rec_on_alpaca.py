@@ -303,15 +303,10 @@ def train(
 
     if sample > -1:
         if sample <= 128 :
-            eval_step = 10
+            eval_step = 20
         else:
             eval_step = sample / 128 * 5
 
-    # if local_rank == 0:
-    #     import pdb;pdb.set_trace()
-    # else:
-    #     import time
-    #     time.sleep(3600)
     trainer_arg = transformers.TrainingArguments(
         per_device_train_batch_size=micro_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
@@ -352,11 +347,11 @@ def train(
     model.config.use_cache = False
 
     old_state_dict = model.state_dict
-    model.state_dict = (
-        lambda self, *_, **__: get_peft_model_state_dict(
-            self, old_state_dict()
-        )
-    ).__get__(model, type(model))
+    # model.state_dict = (
+    #     lambda self, *_, **__: get_peft_model_state_dict(
+    #         self, old_state_dict()
+    #     )
+    # ).__get__(model, type(model))
 
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
