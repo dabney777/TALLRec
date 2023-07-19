@@ -167,29 +167,30 @@ def train(
 
     model = prepare_model_for_int8_training(model)
 
-    model = PeftModel.from_pretrained(
-        model,
-        "tloen/alpaca-lora-7b",
-        torch_dtype=torch.float16,
-    )
-    # config = LoraConfig(
-    #     r=lora_r,
-    #     lora_alpha=lora_alpha,
-    #     target_modules=lora_target_modules,
-    #     lora_dropout=lora_dropout,
-    #     bias="none",
-    #     task_type="CAUSAL_LM",
+    # model = PeftModel.from_pretrained(
+    #     model,
+    #     "tloen/alpaca-lora-7b",
+    #     torch_dtype=torch.float16,
     # )
+    config = LoraConfig(
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        target_modules=lora_target_modules,
+        lora_dropout=lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
     #
-    # model = get_peft_model(model, config)
-    lora_config = model.peft_config['default']
-    lora_config.inference_mode=False
-    lora_config.target_modules = lora_target_modules
-    for n, p in model.named_parameters():
-        # if 'lora_' in n and any([_ in n for _ in lora_config.target_modules]):
+    model = get_peft_model(model, config)
+
+    # lora_config = model.peft_config['default']
+    # lora_config.inference_mode=False
+    # lora_config.target_modules = lora_target_modules
+    # for n, p in model.named_parameters():
+    #     if 'lora_' in n and any([_ in n for _ in lora_config.target_modules]):
+    #         p.requires_grad_()
+        # if 'lora_' in n:
         #     p.requires_grad_()
-        if 'lora_' in n:
-            p.requires_grad_()
 
 
     if train_data_path.endswith(".json"):  # todo: support jsonl
@@ -314,20 +315,20 @@ def train(
         num_train_epochs=num_epochs,
         learning_rate=learning_rate,
         fp16=False,
-        logging_steps=8,
+        logging_steps=10,
         optim="adamw_torch",
         evaluation_strategy="steps",
         save_strategy="steps",
         eval_steps=eval_step,
-        deepspeed='./shell/ds.json',
         save_steps=eval_step,
         output_dir=output_dir,
         save_total_limit=1,
-        load_best_model_at_end=True,
+        load_best_model_at_end=False,
         metric_for_best_model="eval_auc",
         ddp_find_unused_parameters=False if ddp else None,
         group_by_length=group_by_length,
         report_to=None,
+        deepspeed='./shell/ds.json',
         # report_to="wandb" if use_wandb else None,
         # run_name=wandb_run_name if use_wandb else None,
         # eval_accumulation_steps=10,
@@ -342,16 +343,11 @@ def train(
         ),
         compute_metrics=compute_metrics,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=10)]
+        # callbacks=[EarlyStoppingCallback(early_stopping_patience=10)]
     )
     model.config.use_cache = False
 
     old_state_dict = model.state_dict
-    # model.state_dict = (
-    #     lambda self, *_, **__: get_peft_model_state_dict(
-    #         self, old_state_dict()
-    #     )
-    # ).__get__(model, type(model))
 
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
@@ -360,8 +356,13 @@ def train(
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
-    if local_rank == 0:
-        model.save_pretrained(output_dir,  state_dict=old_state_dict(), max_shard_size='600MB')
+    # model.state_dict = (
+    #     lambda self, *_, **__: get_peft_model_state_dict(
+    #         self, old_state_dict()
+    #     )
+    # ).__get__(model, type(model))
+
+    model.save_pretrained(output_dir,  state_dict=old_state_dict(), max_shard_size='600MB')
 
     print(
         "\n If there's a warning about missing keys above, please disregard :)"

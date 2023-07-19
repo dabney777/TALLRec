@@ -17,7 +17,7 @@ do
                     --train_data_path $train_data \
                     --val_data_path $val_data \
                     --output_dir $output_dir"_"$seed"_"$sample \
-                    --batch_size 1280 \
+                    --batch_size 1024 \
                     --micro_batch_size 64 \
                     --num_epochs 140 \
                     --learning_rate $lr \

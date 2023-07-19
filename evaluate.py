@@ -81,6 +81,7 @@ def main(
     if device == "cuda":
         model = LlamaForCausalLM.from_pretrained(
             base_model,
+            # './hf_ckpt',
             load_in_8bit=load_8bit,
             torch_dtype=torch.float16,
             device_map="auto",
@@ -213,7 +214,7 @@ def main(
     cls_pred = min_max_scale(np.array(pred))
     cls_pred = np.where(cls_pred >= 0, 1, 0)
     print(classification_report(gold, cls_pred))
-    import pdb;pdb.set_trace()
+    print(data[train_sce][test_sce][model_name][seed][sample])
 
     f = open(result_json_data, 'w')
     json.dump(data, f, indent=4)
